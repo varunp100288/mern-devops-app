@@ -23,3 +23,8 @@ jobs:
 
       - name: Show repo files
         run: ls -la
+
+      - name: Verify Node and npm versions
+        run: |
+          node -v
+          npm -v
