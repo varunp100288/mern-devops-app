@@ -1,0 +1,60 @@
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: tutorial-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: testdb
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - tutorial-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-proot"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./node-express-server
+      dockerfile: Dockerfile
+    container_name: tutorial-backend
+    restart: unless-stopped
+    environment:
+      DB_HOST: mysql
+      DB_USER: root
+      DB_PASSWORD: root
+      DB_NAME: testdb
+      DB_PORT: 3306
+      PORT: 8080
+    ports:
+      - "8080:8080"
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - tutorial-network
+
+  frontend:
+    build:
+      context: ./react-client
+      dockerfile: Dockerfile
+    container_name: tutorial-frontend
+    restart: unless-stopped
+    ports:
+      - "8082:8080"
+    depends_on:
+      - backend
+    networks:
+      - tutorial-network
+
+volumes:
+  mysql_data:
+
+networks:
+  tutorial-network:
+    driver: bridge
