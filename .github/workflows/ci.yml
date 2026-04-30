@@ -77,7 +77,7 @@ jobs:
       # Isse dependency/source level vulnerabilities detect hoti hain
       # exit-code 0 rakha hai taaki report generate ho aur workflow turant fail na ho
       - name: Run Trivy filesystem scan
-        uses: aquasecurity/trivy-action@v0.33.1
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
         with:
           scan-type: fs
           scan-ref: .
@@ -106,7 +106,7 @@ jobs:
       # Step 18: Backend image vulnerability scan
       # Output file me save kar rahe hain taaki artifact me upload ho sake
       - name: Run Trivy image scan (backend)
-        uses: aquasecurity/trivy-action@v0.33.1
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
         with:
           image-ref: ${{ env.BACKEND_IMAGE_NAME }}:${{ env.IMAGE_TAG }}
           format: table
@@ -117,7 +117,7 @@ jobs:
 
       # Step 19: Frontend image vulnerability scan
       - name: Run Trivy image scan (frontend)
-        uses: aquasecurity/trivy-action@v0.33.1
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
         with:
           image-ref: ${{ env.FRONTEND_IMAGE_NAME }}:${{ env.IMAGE_TAG }}
           format: table
