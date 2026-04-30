@@ -1,13 +1,20 @@
 name: CI Pipeline for Mern Stack Application
 
 on:
+  # Pull request par workflow chalega taaki code merge hone se pehle validate ho sake
   pull_request:
     branches:
       - main
+
+  # Main branch par push hone par workflow chalega
+  # Is event par validation ke saath ECR push bhi hoga
   push:
     branches:
       - main
 
+# Global permissions
+# contents: read -> repository checkout/read ke liye
+# id-token: write -> AWS OIDC authentication ke liye
 permissions:
   contents: read
   id-token: write
@@ -16,133 +23,158 @@ jobs:
   basic-check:
     runs-on: ubuntu-latest
 
+    # Reusable environment variables
+    env:
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+      BACKEND_IMAGE_NAME: mern-devops-backend
+      FRONTEND_IMAGE_NAME: mern-devops-frontend
+      IMAGE_TAG: ${{ github.sha }}
+
     steps:
+      # Step 1: Source code ko GitHub runner par checkout karo
       - name: Checkout source code
         uses: actions/checkout@v4
 
+      # Step 2: Node.js install/setup karo
+      # Backend aur frontend dono Node ecosystem use karte hain
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 18
 
-      - name: Show repo files
-        run: ls -la
 
-      - name: Verify Node and npm versions
-        run: |
-          node -v
-          npm -v
-
+      # Step 5: Backend dependencies deterministic mode me install karo
+      # npm ci CI pipelines ke liye best practice hai
       - name: Install backend dependencies
         working-directory: node-express-server
         run: npm ci
 
+      # Step 6: Frontend dependencies install karo
       - name: Install frontend dependencies
         working-directory: react-client
         run: npm ci
 
+      # Step 7: Frontend production build generate karo
+      # Isse confirm hota hai ki React app build ho rahi hai
       - name: Build frontend
         working-directory: react-client
         run: npm run build
 
+      # Step 8: Backend file ka syntax-level validation
+      # Ye sirf syntax check hai, runtime/integration test nahi
       - name: Backend syntax check
         working-directory: node-express-server
         run: node --check server.js
 
+      # Step 9: Backend dependencies ka top-level tree dikhao
+      # Debugging aur package visibility ke liye useful
       - name: Check backend dependency tree
         working-directory: node-express-server
         run: npm ls --depth=0
 
-      - name: Verify frontend build output
-        working-directory: react-client
-        run: ls -la build
 
-      - name: Verify backend package.json
-        working-directory: node-express-server
-        run: cat package.json
-
-      - name: Verify frontend package.json
-        working-directory: react-client
-        run: cat package.json
-
+      # Step 13: Repository filesystem scan using Trivy
+      # Isse dependency/source level vulnerabilities detect hoti hain
+      # exit-code 0 rakha hai taaki report generate ho aur workflow turant fail na ho
       - name: Run Trivy filesystem scan
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@0.28.0
         with:
           scan-type: fs
           scan-ref: .
           format: table
           output: trivy-fs-report.txt
           exit-code: 0
+          ignore-unfixed: true
           severity: HIGH,CRITICAL
 
-      - name: Upload Trivy FS report
+
+
+      # Step 15: Backend Docker image build karo
+      # PR aur push dono me build hoga taaki Docker packaging validate ho sake
+      - name: Build backend Docker image
+        working-directory: node-express-server
+        run: |
+          docker build -t ${{ env.BACKEND_IMAGE_NAME }}:${{ env.IMAGE_TAG }} .
+
+      # Step 16: Frontend Docker image build karo
+      - name: Build frontend Docker image
+        working-directory: react-client
+        run: |
+          docker build -t ${{ env.FRONTEND_IMAGE_NAME }}:${{ env.IMAGE_TAG }} .
+
+
+      # Step 18: Backend image vulnerability scan
+      # Output file me save kar rahe hain taaki artifact me upload ho sake
+      - name: Run Trivy image scan (backend)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ env.BACKEND_IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+          format: table
+          output: trivy-backend-image-report.txt
+          exit-code: 0
+          ignore-unfixed: true
+          severity: HIGH,CRITICAL
+
+      # Step 19: Frontend image vulnerability scan
+      - name: Run Trivy image scan (frontend)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ env.FRONTEND_IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+          format: table
+          output: trivy-frontend-image-report.txt
+          exit-code: 0
+          ignore-unfixed: true
+          severity: HIGH,CRITICAL
+
+      # Step 20: FS + backend image + frontend image reports ko artifacts me upload karo
+      # PR aur push dono me download ke liye available rahenge
+      - name: Upload Trivy scan reports
         uses: actions/upload-artifact@v4
         with:
-          name: trivy-fs-report
-          path: trivy-fs-report.txt
+          name: trivy-reports-${{ github.event_name }}-${{ github.run_number }}
+          path: |
+            trivy-fs-report.txt
+            trivy-backend-image-report.txt
+            trivy-frontend-image-report.txt
+          retention-days: 7
 
-      - name: Print commit SHA
-        run: echo ${{ github.sha }}
-
+      # Step 21: AWS credentials configure karo sirf push event par
+      # PR me ECR push nahi hoga, isliye AWS login skip rahega
       - name: Configure AWS credentials
         if: github.event_name == 'push'
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: ${{ secrets.AWS_REGION }}
+          aws-region: ${{ env.AWS_REGION }}
 
+      # Step 22: Amazon ECR login sirf push par
       - name: Login to Amazon ECR
         if: github.event_name == 'push'
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Build backend Docker image
-        working-directory: node-express-server
-        run: |
-          docker build -t mern-devops-backend:${{ github.sha }} .
-
-      - name: Build frontend Docker image
-        working-directory: react-client
-        run: |
-          docker build -t mern-devops-frontend:${{ github.sha }} .
-
-      - name: List Docker images
-        run: docker images
-
-      - name: Run Trivy image scan (backend)
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: mern-devops-backend:${{ github.sha }}
-          format: table
-          exit-code: 0
-          severity: HIGH,CRITICAL
-
-      - name: Run Trivy image scan (frontend)
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: mern-devops-frontend:${{ github.sha }}
-          format: table
-          exit-code: 0
-          severity: HIGH,CRITICAL
-
+      # Step 23: Backend local image ko ECR-compatible tag do
       - name: Tag backend image for ECR
         if: github.event_name == 'push'
         run: |
-          docker tag mern-devops-backend:${{ github.sha }} \
-            ${{ steps.login-ecr.outputs.registry }}/mern-devops-backend:${{ github.sha }}
+          docker tag ${{ env.BACKEND_IMAGE_NAME }}:${{ env.IMAGE_TAG }} \
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.BACKEND_IMAGE_NAME }}:${{ env.IMAGE_TAG }}
 
+      # Step 24: Frontend local image ko ECR-compatible tag do
       - name: Tag frontend image for ECR
         if: github.event_name == 'push'
         run: |
-          docker tag mern-devops-frontend:${{ github.sha }} \
-            ${{ steps.login-ecr.outputs.registry }}/mern-devops-frontend:${{ github.sha }}
+          docker tag ${{ env.FRONTEND_IMAGE_NAME }}:${{ env.IMAGE_TAG }} \
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.FRONTEND_IMAGE_NAME }}:${{ env.IMAGE_TAG }}
 
+      # Step 25: Backend image ECR me push karo
       - name: Push backend Docker image to ECR
         if: github.event_name == 'push'
         run: |
-          docker push ${{ steps.login-ecr.outputs.registry }}/mern-devops-backend:${{ github.sha }}
+          docker push ${{ steps.login-ecr.outputs.registry }}/${{ env.BACKEND_IMAGE_NAME }}:${{ env.IMAGE_TAG }}
 
+      # Step 26: Frontend image ECR me push karo
       - name: Push frontend Docker image to ECR
         if: github.event_name == 'push'
         run: |
-          docker push ${{ steps.login-ecr.outputs.registry }}/mern-devops-frontend:${{ github.sha }}
+          docker push ${{ steps.login-ecr.outputs.registry }}/${{ env.FRONTEND_IMAGE_NAME }}:${{ env.IMAGE_TAG }}
