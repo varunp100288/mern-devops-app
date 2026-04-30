@@ -8,6 +8,10 @@ on:
     branches:
       - main
 
+permissions:
+  contents: read
+  id-token: write
+
 jobs:
   basic-check:
     runs-on: ubuntu-latest
@@ -28,3 +32,117 @@ jobs:
         run: |
           node -v
           npm -v
+
+      - name: Install backend dependencies
+        working-directory: node-express-server
+        run: npm ci
+
+      - name: Install frontend dependencies
+        working-directory: react-client
+        run: npm ci
+
+      - name: Build frontend
+        working-directory: react-client
+        run: npm run build
+
+      - name: Backend syntax check
+        working-directory: node-express-server
+        run: node --check server.js
+
+      - name: Check backend dependency tree
+        working-directory: node-express-server
+        run: npm ls --depth=0
+
+      - name: Verify frontend build output
+        working-directory: react-client
+        run: ls -la build
+
+      - name: Verify backend package.json
+        working-directory: node-express-server
+        run: cat package.json
+
+      - name: Verify frontend package.json
+        working-directory: react-client
+        run: cat package.json
+
+      - name: Run Trivy filesystem scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: fs
+          scan-ref: .
+          format: table
+          output: trivy-fs-report.txt
+          exit-code: 0
+          severity: HIGH,CRITICAL
+
+      - name: Upload Trivy FS report
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-fs-report
+          path: trivy-fs-report.txt
+
+      - name: Print commit SHA
+        run: echo ${{ github.sha }}
+
+      - name: Configure AWS credentials
+        if: github.event_name == 'push'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        if: github.event_name == 'push'
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build backend Docker image
+        working-directory: node-express-server
+        run: |
+          docker build -t mern-devops-backend:${{ github.sha }} .
+
+      - name: Build frontend Docker image
+        working-directory: react-client
+        run: |
+          docker build -t mern-devops-frontend:${{ github.sha }} .
+
+      - name: List Docker images
+        run: docker images
+
+      - name: Run Trivy image scan (backend)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: mern-devops-backend:${{ github.sha }}
+          format: table
+          exit-code: 0
+          severity: HIGH,CRITICAL
+
+      - name: Run Trivy image scan (frontend)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: mern-devops-frontend:${{ github.sha }}
+          format: table
+          exit-code: 0
+          severity: HIGH,CRITICAL
+
+      - name: Tag backend image for ECR
+        if: github.event_name == 'push'
+        run: |
+          docker tag mern-devops-backend:${{ github.sha }} \
+            ${{ steps.login-ecr.outputs.registry }}/mern-devops-backend:${{ github.sha }}
+
+      - name: Tag frontend image for ECR
+        if: github.event_name == 'push'
+        run: |
+          docker tag mern-devops-frontend:${{ github.sha }} \
+            ${{ steps.login-ecr.outputs.registry }}/mern-devops-frontend:${{ github.sha }}
+
+      - name: Push backend Docker image to ECR
+        if: github.event_name == 'push'
+        run: |
+          docker push ${{ steps.login-ecr.outputs.registry }}/mern-devops-backend:${{ github.sha }}
+
+      - name: Push frontend Docker image to ECR
+        if: github.event_name == 'push'
+        run: |
+          docker push ${{ steps.login-ecr.outputs.registry }}/mern-devops-frontend:${{ github.sha }}
