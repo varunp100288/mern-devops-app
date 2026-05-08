@@ -91,7 +91,7 @@ export default class AddTutorial extends Component {
             </div>
 
             <div className="form-group">
-              <label htmlFor="description">Description</label>
+              <label htmlFor="description">This is updating from ci/cd pipeline using eks</label>
               <input
                 type="text"
                 className="form-control"
