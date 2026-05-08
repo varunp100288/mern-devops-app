@@ -178,3 +178,50 @@ jobs:
         if: github.event_name == 'push'
         run: |
           docker push ${{ steps.login-ecr.outputs.registry }}/${{ env.FRONTEND_IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+
+      # Step 27: GitOps repo checkout karo taaki deployment manifests update kiye ja sakein
+      - name: Checkout GitOps repository
+        if: github.event_name == 'push'
+        uses: actions/checkout@v4
+        with:
+          repository: varunp100288/mern-devops-gitops
+          ref: main
+          token: ${{ secrets.GITOPS_PAT }}
+          path: gitops
+
+      # Step 28: Git config set karo taaki bot commit kar sake
+      - name: Configure Git identity for commit
+        if: github.event_name == 'push'
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      # Step 29: Backend aur frontend deployment files me latest SHA tag update karo
+      - name: Update image tags in GitOps repo
+        if: github.event_name == 'push'
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        run: |
+          sed -i "s|image: .*mern-devops-backend:.*|image: ${ECR_REGISTRY}/${BACKEND_IMAGE_NAME}:${IMAGE_TAG}|g" gitops/base/backend-deployment.yaml
+          sed -i "s|image: .*mern-devops-frontend:.*|image: ${ECR_REGISTRY}/${FRONTEND_IMAGE_NAME}:${IMAGE_TAG}|g" gitops/base/frontend-deployment.yaml
+
+          echo "Updated backend image:"
+          grep "image:" gitops/base/backend-deployment.yaml
+
+          echo "Updated frontend image:"
+          grep "image:" gitops/base/frontend-deployment.yaml
+
+      # Step 30: Agar actual change hua hai tabhi commit/push karo
+      - name: Commit and push updated image tags to GitOps repo
+        if: github.event_name == 'push'
+        run: |
+          cd gitops
+          git add base/backend-deployment.yaml base/frontend-deployment.yaml
+
+          if git diff --cached --quiet; then
+            echo "No changes detected in GitOps manifests."
+            exit 0
+          fi
+
+          git commit -m "Update image tags to ${IMAGE_TAG}"
+          git push origin main
