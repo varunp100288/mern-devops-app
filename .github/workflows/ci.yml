@@ -216,6 +216,7 @@ jobs:
         if: github.event_name == 'push'
         run: |
           cd gitops
+          git remote set-url origin https://x-access-token:${{ secrets.GITOPS_PAT }}@github.com/varunp100288/mern-devops-gitops.git
           git add base/backend-deployment.yaml base/frontend-deployment.yaml
 
           if git diff --cached --quiet; then
